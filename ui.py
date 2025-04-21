@@ -1,6 +1,7 @@
 """
 Web UI for Low-VRAM Image Generation Tool
 Uses Gradio to provide a simple interface for the generate.py script
+Optimized to utilize high CPU memory (64GB) for offloading
 """
 
 import os
@@ -11,18 +12,23 @@ import tempfile
 from pathlib import Path
 import time
 import torch
+import psutil
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
-    from generate import check_vram
+    from generate import check_system_resources
 except ImportError:
-    def check_vram():
-        if not torch.cuda.is_available():
-            return 0, "CPU only (CUDA not available)"
+    def check_system_resources():
+        ram = psutil.virtual_memory()
+        ram_total = ram.total / (1024 * 1024 * 1024)  # GB
+        ram_available = ram.available / (1024 * 1024 * 1024)  # GB
         
-        total = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
-        allocated = torch.cuda.memory_allocated(0) / (1024 * 1024)
-        return allocated, f"GPU: {torch.cuda.get_device_name(0)} ({total:.0f}MB total, {allocated:.0f}MB used)"
+        if torch.cuda.is_available():
+            total_vram = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
+            allocated_vram = torch.cuda.memory_allocated(0) / (1024 * 1024)
+            return allocated_vram, ram_available
+        else:
+            return 0, ram_available
 
 def run_generation(
     prompt, 
@@ -35,13 +41,16 @@ def run_generation(
     seed, 
     lowvram, 
     precision, 
+    cpu_offload,
+    disable_xformers,
+    scheduler,
     ref_images, 
     ref_strength,
     use_controlnet,
     controlnet_type,
     controlnet_image
 ):
-    """Run the image generation script with the provided parameters"""
+    """Run the image generation script with the provided parameters including CPU optimization options"""
     with tempfile.TemporaryDirectory() as temp_dir:
         output_path = os.path.join(temp_dir, "output.png")
         
@@ -74,6 +83,11 @@ def run_generation(
             cmd.append("--lowvram")
         
         cmd.extend(["--precision", precision])
+        cmd.extend(["--cpu_offload", cpu_offload])
+        cmd.extend(["--scheduler", scheduler])
+        
+        if disable_xformers:
+            cmd.append("--disable_xformers")
         
         if ref_images:
             for img in ref_images:
@@ -133,11 +147,18 @@ def run_generation(
 
 def create_ui():
     """Create the Gradio UI"""
-    vram, gpu_info = check_vram()
+    vram, available_ram = check_system_resources()
+    
+    gpu_info = "CPU only (CUDA not available)"
+    if torch.cuda.is_available():
+        total_vram = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
+        gpu_info = f"GPU: {torch.cuda.get_device_name(0)} ({total_vram:.0f}MB total, {vram:.0f}MB used)"
+    
+    ram_info = f"RAM: {available_ram:.1f}GB available"
     
     with gr.Blocks(title="Low-VRAM Image Generator") as app:
         gr.Markdown("# Low-VRAM Image Generator")
-        gr.Markdown(f"### System Info: {gpu_info}")
+        gr.Markdown(f"### System Info: {gpu_info} | {ram_info}")
         
         with gr.Tabs():
             with gr.TabItem("Basic"):
@@ -165,6 +186,20 @@ def create_ui():
                         with gr.Row():
                             lowvram = gr.Checkbox(label="Low VRAM Mode", value=True)
                             precision = gr.Dropdown(label="Precision", choices=["8bit", "4bit"], value="8bit")
+                        
+                        with gr.Row():
+                            cpu_offload = gr.Dropdown(
+                                label="CPU Offload Strategy", 
+                                choices=["standard", "aggressive"], 
+                                value="standard",
+                                info="Aggressive uses more RAM (64GB recommended) but less VRAM"
+                            )
+                            disable_xformers = gr.Checkbox(label="Disable xformers", value=False)
+                            scheduler = gr.Dropdown(
+                                label="Scheduler", 
+                                choices=["dpm++", "ddim", "euler_a"], 
+                                value="dpm++"
+                            )
                         
                         generate_btn = gr.Button("Generate Image", variant="primary")
                     
@@ -196,6 +231,7 @@ def create_ui():
             inputs=[
                 prompt, negative_prompt, model_choice, width, height, 
                 steps, guidance, seed, lowvram, precision,
+                cpu_offload, disable_xformers, scheduler,
                 None, 0, False, "canny", None  # Default values for advanced options
             ],
             outputs=[output_image, output_text]
@@ -206,6 +242,7 @@ def create_ui():
             inputs=[
                 prompt, negative_prompt, model_choice, width, height, 
                 steps, guidance, seed, lowvram, precision,
+                cpu_offload, disable_xformers, scheduler,
                 ref_images, ref_strength, use_controlnet, controlnet_type, controlnet_image
             ],
             outputs=[output_image, output_text]
