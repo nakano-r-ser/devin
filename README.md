@@ -98,6 +98,36 @@ python generate.py --prompt "a beautiful landscape" --model stable-cascade --lit
 5. **Clear Cache**: The tool automatically clears CUDA cache, but you may need to restart for multiple generations
 6. **Monitor Usage**: Check VRAM usage with `nvidia-smi` while generating
 
+## CPU and GPU Collaboration (CPU/GPUの連携について)
+
+This tool optimizes image generation by intelligently distributing workloads between GPU and CPU memory:
+
+```
+CPUとGPUを連携させた画像生成の仕組み:
+
+1. GPUメモリ(VRAM)の最適化:
+   - モデルの量子化 (8ビットまたは4ビット精度に圧縮)
+   - アテンションメカニズムの最適化 (xformers, スライシング)
+   - VAEのCPUオフロード (画像エンコード/デコード処理)
+
+2. 大容量CPUメモリ(64GB)の活用:
+   - 「aggressive」CPUオフロードモード: モデルの一部をCPUメモリに配置
+   - 動的メモリ管理: 利用可能なRAMに基づいてスレッド数と割り当てを最適化
+   - PyTorchのキャッシュ管理: 不要なメモリを定期的に解放
+
+3. 処理フロー:
+   - プロンプト解析とトークン化: CPU上で実行
+   - 参照画像処理: CPU上でIP-Adapterを使用して処理
+   - 主要な推論計算: GPU上で実行 (必要に応じてCPUにオフロード)
+   - 最終画像生成: CPUとGPUの両方を使用
+
+4. 最適化設定:
+   - 標準モード: 基本的なCPUオフロード (16GB RAM以上推奨)
+   - アグレッシブモード: 大量のCPUオフロード (64GB RAM推奨、VRAM使用量を最小化)
+```
+
+The `--cpu_offload aggressive` option maximizes the use of available CPU memory (up to 64GB) to minimize VRAM usage, making it possible to run larger models on limited GPUs like the GTX1650.
+
 ## Command Line Options
 
 ```
