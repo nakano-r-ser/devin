@@ -146,7 +146,7 @@ def run_generation(
             yield None, "\n".join(output_lines) + "\nError: Output image not generated"
 
 def create_ui():
-    """Create the Gradio UI"""
+    """Create a simplified Gradio UI"""
     vram, available_ram = check_system_resources()
     
     gpu_info = "CPU only (CUDA not available)"
@@ -156,88 +156,99 @@ def create_ui():
     
     ram_info = f"RAM: {available_ram:.1f}GB available"
     
-    with gr.Blocks(title="Low-VRAM Image Generator") as app:
-        gr.Markdown("# Low-VRAM Image Generator")
-        gr.Markdown(f"### System Info: {gpu_info} | {ram_info}")
+    with gr.Blocks(title="Image Generator") as app:
+        gr.Markdown("# 画像生成ツール / Image Generator")
+        gr.Markdown(f"システム情報: {gpu_info} | {ram_info}")
         
-        with gr.Tabs():
-            with gr.TabItem("Basic"):
-                with gr.Row():
-                    with gr.Column():
-                        prompt = gr.Textbox(label="Prompt", lines=3, placeholder="Enter your prompt here...")
-                        negative_prompt = gr.Textbox(label="Negative Prompt", lines=2, placeholder="What you don't want in the image...")
-                        
-                        with gr.Row():
-                            model_choice = gr.Dropdown(
-                                label="Model", 
-                                choices=["Stable Diffusion 1.5", "Stable Cascade", "Stable Cascade Lite"],
-                                value="Stable Diffusion 1.5"
-                            )
-                            
-                            with gr.Column():
-                                width = gr.Slider(label="Width", minimum=256, maximum=768, step=64, value=512)
-                                height = gr.Slider(label="Height", minimum=256, maximum=768, step=64, value=512)
-                        
-                        with gr.Row():
-                            steps = gr.Slider(label="Steps", minimum=10, maximum=50, step=1, value=30)
-                            guidance = gr.Slider(label="Guidance Scale", minimum=1.0, maximum=15.0, step=0.5, value=7.5)
-                            seed = gr.Number(label="Seed (-1 for random)", value=-1, precision=0)
-                        
-                        with gr.Row():
-                            lowvram = gr.Checkbox(label="Low VRAM Mode", value=True)
-                            precision = gr.Dropdown(label="Precision", choices=["8bit", "4bit"], value="8bit")
-                        
-                        with gr.Row():
-                            cpu_offload = gr.Dropdown(
-                                label="CPU Offload Strategy", 
-                                choices=["standard", "aggressive"], 
-                                value="standard",
-                                info="Aggressive uses more RAM (64GB recommended) but less VRAM"
-                            )
-                            disable_xformers = gr.Checkbox(label="Disable xformers", value=False)
-                            scheduler = gr.Dropdown(
-                                label="Scheduler", 
-                                choices=["dpm++", "ddim", "euler_a"], 
-                                value="dpm++"
-                            )
-                        
-                        generate_btn = gr.Button("Generate Image", variant="primary")
-                    
-                    with gr.Column():
-                        output_image = gr.Image(label="Generated Image", type="filepath")
-                        output_text = gr.Textbox(label="Generation Log", lines=10)
-            
-            with gr.TabItem("Advanced"):
-                with gr.Row():
-                    with gr.Column():
-                        gr.Markdown("### Reference Images")
-                        ref_images = gr.File(label="Reference Images (up to 4)", file_count="multiple", file_types=["image"])
-                        ref_strength = gr.Slider(label="Reference Strength", minimum=0.0, maximum=1.0, step=0.05, value=0.5)
-                        
-                        gr.Markdown("### ControlNet")
-                        use_controlnet = gr.Checkbox(label="Use ControlNet", value=False)
-                        controlnet_type = gr.Dropdown(
-                            label="ControlNet Type", 
-                            choices=["canny", "depth", "pose"],
-                            value="canny"
-                        )
-                        controlnet_image = gr.File(label="ControlNet Input Image", file_types=["image"])
+        with gr.Row():
+            with gr.Column(scale=1):
+                prompt = gr.Textbox(
+                    label="プロンプト / Prompt", 
+                    lines=3, 
+                    placeholder="画像の説明を入力してください / Describe the image you want to generate..."
+                )
                 
-                with gr.Row():
-                    advanced_generate_btn = gr.Button("Generate with Advanced Options", variant="primary")
+                negative_prompt = gr.Textbox(
+                    label="ネガティブプロンプト / Negative Prompt", 
+                    lines=2, 
+                    placeholder="避けたい要素 / What you don't want in the image..."
+                )
+                
+                with gr.Accordion("基本設定 / Basic Settings", open=True):
+                    model_choice = gr.Dropdown(
+                        label="モデル / Model", 
+                        choices=["Stable Diffusion 1.5", "Stable Cascade Lite"],
+                        value="Stable Diffusion 1.5"
+                    )
+                    
+                    with gr.Row():
+                        width = gr.Slider(label="幅 / Width", minimum=256, maximum=768, step=64, value=512)
+                        height = gr.Slider(label="高さ / Height", minimum=256, maximum=768, step=64, value=512)
+                
+                with gr.Accordion("メモリ最適化 / Memory Optimization", open=True):
+                    with gr.Row():
+                        lowvram = gr.Checkbox(label="低VRAMモード / Low VRAM Mode", value=True)
+                        precision = gr.Dropdown(
+                            label="精度 / Precision", 
+                            choices=["8bit", "4bit"], 
+                            value="8bit"
+                        )
+                    
+                    cpu_offload = gr.Radio(
+                        label="CPUオフロード / CPU Offload", 
+                        choices=["standard", "aggressive"], 
+                        value="aggressive",
+                        info="Aggressive: 64GB RAM推奨 / 64GB RAM recommended"
+                    )
+                
+                with gr.Accordion("詳細設定 / Advanced Settings", open=False):
+                    with gr.Row():
+                        steps = gr.Slider(label="ステップ数 / Steps", minimum=10, maximum=50, step=1, value=30)
+                        guidance = gr.Slider(label="ガイダンス / Guidance Scale", minimum=1.0, maximum=15.0, step=0.5, value=7.5)
+                    
+                    with gr.Row():
+                        seed = gr.Number(label="シード値 / Seed (-1 for random)", value=-1, precision=0)
+                        scheduler = gr.Dropdown(
+                            label="スケジューラ / Scheduler", 
+                            choices=["dpm++", "ddim", "euler_a"], 
+                            value="dpm++"
+                        )
+                    
+                    disable_xformers = gr.Checkbox(label="xformersを無効化 / Disable xformers", value=False)
+                
+                with gr.Accordion("参照画像 / Reference Images", open=False):
+                    ref_images = gr.File(
+                        label="参照画像（最大4枚） / Reference Images (up to 4)", 
+                        file_count="multiple", 
+                        file_types=["image"]
+                    )
+                    ref_strength = gr.Slider(
+                        label="参照強度 / Reference Strength", 
+                        minimum=0.0, 
+                        maximum=1.0, 
+                        step=0.05, 
+                        value=0.5
+                    )
+                
+                with gr.Accordion("ControlNet", open=False):
+                    use_controlnet = gr.Checkbox(label="ControlNetを使用 / Use ControlNet", value=False)
+                    controlnet_type = gr.Dropdown(
+                        label="ControlNetタイプ / Type", 
+                        choices=["canny", "depth", "pose"],
+                        value="canny"
+                    )
+                    controlnet_image = gr.File(
+                        label="ControlNet入力画像 / Input Image", 
+                        file_types=["image"]
+                    )
+                
+                generate_btn = gr.Button("画像を生成 / Generate Image", variant="primary", size="lg")
+            
+            with gr.Column(scale=1):
+                output_image = gr.Image(label="生成された画像 / Generated Image", type="filepath")
+                output_text = gr.Textbox(label="生成ログ / Generation Log", lines=5)
         
         generate_btn.click(
-            fn=run_generation,
-            inputs=[
-                prompt, negative_prompt, model_choice, width, height, 
-                steps, guidance, seed, lowvram, precision,
-                cpu_offload, disable_xformers, scheduler,
-                None, 0, False, "canny", None  # Default values for advanced options
-            ],
-            outputs=[output_image, output_text]
-        )
-        
-        advanced_generate_btn.click(
             fn=run_generation,
             inputs=[
                 prompt, negative_prompt, model_choice, width, height, 
