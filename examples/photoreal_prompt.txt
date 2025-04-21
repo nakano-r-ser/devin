@@ -1,0 +1,1 @@
+--prompt "photorealistic portrait of a middle-aged man with beard, detailed skin texture, professional lighting, high detail, 8k" --negative_prompt "cartoon, anime, illustration, painting, drawing, low quality, blurry, distorted" --width 512 --height 512 --lowvram --precision 8bit --steps 30 --guidance 7.5 --output photoreal_portrait.png

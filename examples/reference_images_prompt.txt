@@ -1,0 +1,1 @@
+--prompt "portrait of a person with mixed artistic style" --ref examples/reference1.jpg --ref examples/reference2.jpg --ref examples/reference3.jpg --ref_strength 0.7 --width 512 --height 512 --lowvram --precision 8bit --steps 30 --guidance 7.5 --output mixed_style_portrait.png
