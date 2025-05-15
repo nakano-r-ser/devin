@@ -2,6 +2,7 @@
 Low-VRAM Image Generation Tool for GTX1650 (4GB VRAM)
 Supports Stable Diffusion 1.5 with 8-bit/4-bit quantization and IP-Adapter for reference images
 Optimized to utilize high CPU memory (64GB) for offloading
+Includes Flow-GRPO reinforcement learning models for improved text-to-image generation
 """
 
 import argparse
@@ -21,7 +22,9 @@ from diffusers import (
     ControlNetModel,
     StableDiffusionControlNetPipeline,
     DDIMScheduler,
-    EulerAncestralDiscreteScheduler
+    EulerAncestralDiscreteScheduler,
+    FlowMatchEulerDiscreteScheduler,
+    StableDiffusion3Pipeline
 )
 from diffusers.utils import load_image
 from huggingface_hub import hf_hub_download
@@ -34,6 +37,10 @@ IP_ADAPTER_MODEL = "InvokeAI/ip_adapter_plus_sd15"
 CONTROLNET_CANNY = "lllyasviel/sd-controlnet-canny"
 CONTROLNET_DEPTH = "lllyasviel/sd-controlnet-depth"
 CONTROLNET_POSE = "lllyasviel/sd-controlnet-openpose"
+SD3_BASE_MODEL = "stabilityai/stable-diffusion-3.5-medium"
+FLOW_GRPO_GENEVAL = "jieliu/SD3.5M-FlowGRPO-GenEval"
+FLOW_GRPO_TEXT = "jieliu/SD3.5M-FlowGRPO-Text"
+FLOW_GRPO_PICKSCORE = "jieliu/SD3.5M-FlowGRPO-PickScore"
 
 def check_system_resources():
     """Check available VRAM and RAM"""
@@ -251,6 +258,85 @@ def load_stable_cascade(args):
     
     return prior, decoder, device, dtype
 
+def load_flow_grpo(args):
+    """Load Flow-GRPO model with memory optimizations"""
+    initial_vram, available_ram = check_system_resources()
+    
+    high_ram = available_ram > 32  # Consider high RAM if more than 32GB available
+    cpu_config = optimize_for_cpu_offload(high_ram)
+    print(f"Configured for {'high' if high_ram else 'standard'} RAM usage: {cpu_config}")
+    
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    
+    if args.flow_grpo_task == "geneval":
+        model_id = FLOW_GRPO_GENEVAL
+        print("Using Flow-GRPO GenEval model for complex composition tasks")
+    elif args.flow_grpo_task == "text":
+        model_id = FLOW_GRPO_TEXT
+        print("Using Flow-GRPO Text model for text rendering tasks")
+    else:  # pickscore
+        model_id = FLOW_GRPO_PICKSCORE
+        print("Using Flow-GRPO PickScore model for human preference alignment")
+    
+    print(f"Loading base model: {SD3_BASE_MODEL}")
+    
+    if args.precision == "4bit":
+        from bitsandbytes.nn import Linear4bit
+        quantization_config = {"load_in_4bit": True}
+    else:  # 8bit
+        quantization_config = {"load_in_8bit": True}
+    
+    pipe = StableDiffusion3Pipeline.from_pretrained(
+        SD3_BASE_MODEL,
+        torch_dtype=dtype,
+        **quantization_config
+    )
+    
+    from peft import PeftModel
+    
+    print(f"Loading Flow-GRPO adapter: {model_id}")
+    pipe.transformer = PeftModel.from_pretrained(
+        pipe.transformer,
+        model_id,
+        adapter_name="flow_grpo"
+    )
+    
+    pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(pipe.scheduler.config)
+    
+    if args.lowvram or device == "cuda":
+        if high_ram and getattr(args, 'cpu_offload', '') == "aggressive":
+            from accelerate import cpu_offload_with_hook
+            
+            for component in [pipe.transformer, pipe.vae, pipe.text_encoder, pipe.text_encoder_2]:
+                cpu_offload_with_hook(component, device, offload_buffers=True)
+            
+            print("Using aggressive CPU offloading (high RAM mode)")
+        else:
+            # Standard CPU offloading
+            pipe.enable_model_cpu_offload()
+            print("Using standard CPU offloading")
+        
+        pipe.enable_vae_slicing()
+        pipe.enable_attention_slicing(slice_size="auto")
+        
+        if hasattr(pipe, "enable_xformers_memory_efficient_attention") and not getattr(args, 'disable_xformers', False):
+            pipe.enable_xformers_memory_efficient_attention()
+            print("Using xformers for memory-efficient attention")
+    
+    loaded_vram, _ = check_system_resources()
+    vram_used = loaded_vram - initial_vram
+    print(f"Flow-GRPO model loaded, using {vram_used:.0f}MB of VRAM")
+    
+    if loaded_vram > 3800 and device == "cuda":
+        print(f"WARNING: VRAM usage high ({loaded_vram:.0f}MB > 3800MB)")
+        print("Try using --lowvram or --precision 4bit or --cpu_offload aggressive")
+        if not args.force:
+            print("Use --force to continue with high VRAM usage")
+            sys.exit(1)
+    
+    return pipe, device, dtype
+
 def generate_image(args):
     """Generate image based on command line arguments"""
     start_time = time.time()
@@ -279,6 +365,30 @@ def generate_image(args):
             output_type="pil",
         )
         image = decoder_output.images[0]
+    
+    elif args.model == "flow-grpo":
+        pipe, device, dtype = load_flow_grpo(args)
+        
+        print(f"Generating with Flow-GRPO ({args.flow_grpo_task}) using prompt: {args.prompt}")
+        
+        skip_guidance_layers = [7, 8, 9]  # Recommended by StabilityAI
+        
+        output = pipe(
+            prompt=args.prompt,
+            negative_prompt=args.negative_prompt,
+            num_inference_steps=args.steps,
+            guidance_scale=args.guidance,
+            width=args.width,
+            height=args.height,
+            generator=torch.Generator(device).manual_seed(args.seed) if args.seed != -1 else None,
+            skip_guidance_layers=skip_guidance_layers,
+            skip_layer_guidance_scale=2.8,
+            skip_layer_guidance_stop=0.2,
+            skip_layer_guidance_start=0.01,
+            output_type="pil"
+        )
+        
+        image = output.images[0]
         
     else:  # Stable Diffusion
         pipe, device, dtype = load_stable_diffusion(args)
@@ -349,9 +459,13 @@ def generate_image(args):
 def main():
     parser = argparse.ArgumentParser(description="Low-VRAM Image Generation Tool")
     
-    parser.add_argument("--model", type=str, default="sd15", choices=["sd15", "stable-cascade"],
-                        help="Model to use: sd15 (Stable Diffusion 1.5) or stable-cascade")
+    parser.add_argument("--model", type=str, default="sd15", 
+                        choices=["sd15", "stable-cascade", "flow-grpo"],
+                        help="Model to use: sd15 (Stable Diffusion 1.5), stable-cascade, or flow-grpo")
     parser.add_argument("--lite", action="store_true", help="Use Stable Cascade Lite (smaller model)")
+    parser.add_argument("--flow_grpo_task", type=str, default="geneval", 
+                        choices=["geneval", "text", "pickscore"],
+                        help="Flow-GRPO task: geneval (composition), text (rendering), or pickscore (preference)")
     
     parser.add_argument("--prompt", type=str, required=True, help="Text prompt for image generation")
     parser.add_argument("--negative_prompt", type=str, default="", 
@@ -379,6 +493,8 @@ def main():
                         help="CPU offloading strategy (aggressive uses more RAM but less VRAM)")
     parser.add_argument("--disable_xformers", action="store_true",
                         help="Disable xformers memory efficient attention")
+    parser.add_argument("--force", action="store_true",
+                        help="Force generation even if VRAM usage is high")
     
     # Reference images
     parser.add_argument("--ref", action="append", default=None,
@@ -403,6 +519,14 @@ def main():
     
     if args.controlnet and not args.controlnet_image:
         parser.error("--controlnet requires --controlnet_image")
+    
+    if args.model == "flow-grpo" and args.ref:
+        print("Warning: Reference images are not supported with Flow-GRPO models")
+        args.ref = None
+    
+    if args.model == "flow-grpo" and args.controlnet:
+        print("Warning: ControlNet is not supported with Flow-GRPO models")
+        args.controlnet = False
     
     # Optimize for high RAM if available
     if available_ram > 32 and args.cpu_offload == "aggressive":

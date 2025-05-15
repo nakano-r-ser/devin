@@ -1,0 +1,1 @@
+--model flow-grpo --flow_grpo_task geneval --prompt "a beautiful landscape with mountains, a lake, and a small cabin in the foreground" --negative_prompt "ugly, blurry, low quality, distorted" --width 512 --height 512 --lowvram --precision 8bit --cpu_offload aggressive --steps 30 --guidance 7.5 --output flow_grpo_landscape.png

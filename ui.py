@@ -34,6 +34,7 @@ def run_generation(
     prompt, 
     negative_prompt, 
     model_choice, 
+    flow_grpo_task,
     width, 
     height, 
     steps, 
@@ -66,6 +67,11 @@ def run_generation(
             cmd.append("--model")
             cmd.append("stable-cascade")
             cmd.append("--lite")
+        elif model_choice == "Flow-GRPO":
+            cmd.append("--model")
+            cmd.append("flow-grpo")
+            cmd.append("--flow_grpo_task")
+            cmd.append(flow_grpo_task)
         
         cmd.extend(["--prompt", prompt])
         if negative_prompt:
@@ -177,8 +183,16 @@ def create_ui():
                 with gr.Accordion("基本設定 / Basic Settings", open=True):
                     model_choice = gr.Dropdown(
                         label="モデル / Model", 
-                        choices=["Stable Diffusion 1.5", "Stable Cascade Lite"],
+                        choices=["Stable Diffusion 1.5", "Stable Cascade Lite", "Flow-GRPO"],
                         value="Stable Diffusion 1.5"
+                    )
+                    
+                    flow_grpo_task = gr.Dropdown(
+                        label="Flow-GRPO タスク / Task",
+                        choices=["geneval", "text", "pickscore"],
+                        value="geneval",
+                        visible=False,
+                        info="GenEval: composition, Text: text rendering, PickScore: human preference"
                     )
                     
                     with gr.Row():
@@ -248,10 +262,19 @@ def create_ui():
                 output_image = gr.Image(label="生成された画像 / Generated Image", type="filepath")
                 output_text = gr.Textbox(label="生成ログ / Generation Log", lines=5)
         
+        def update_flow_grpo_visibility(model):
+            return {"visible": model == "Flow-GRPO"}
+        
+        model_choice.change(
+            fn=update_flow_grpo_visibility,
+            inputs=[model_choice],
+            outputs=[flow_grpo_task]
+        )
+        
         generate_btn.click(
             fn=run_generation,
             inputs=[
-                prompt, negative_prompt, model_choice, width, height, 
+                prompt, negative_prompt, model_choice, flow_grpo_task, width, height, 
                 steps, guidance, seed, lowvram, precision,
                 cpu_offload, disable_xformers, scheduler,
                 ref_images, ref_strength, use_controlnet, controlnet_type, controlnet_image

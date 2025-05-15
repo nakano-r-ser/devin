@@ -24,3 +24,7 @@ dependencies:
     - gradio>=3.50.0
     - psutil
     - ip_adapter
+    - peft>=0.8.0
+    - paddlepaddle-gpu==2.6.2
+    - paddleocr==2.9.1
+    - python-Levenshtein
