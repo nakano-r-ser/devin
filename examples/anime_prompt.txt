@@ -1,0 +1,1 @@
+--prompt "anime style portrait of a young girl with blue hair and green eyes, detailed, vibrant colors, studio ghibli inspired" --negative_prompt "low quality, blurry, distorted, deformed, ugly, bad anatomy" --width 512 --height 512 --lowvram --precision 8bit --steps 30 --guidance 7.5 --output anime_portrait.png
